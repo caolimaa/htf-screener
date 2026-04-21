@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>HTF Pre-Screener</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', sans-serif; padding: 20px; }
+    h1 { font-size: 1.6rem; margin-bottom: 4px; color: #58a6ff; }
+    .meta { font-size: 0.85rem; color: #8b949e; margin-bottom: 16px; }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+    input[type="text"] {
+      background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+      padding: 7px 12px; border-radius: 6px; font-size: 0.9rem; width: 220px;
+    }
+    select {
+      background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+      padding: 7px 12px; border-radius: 6px; font-size: 0.9rem;
+    }
+    label { font-size: 0.85rem; color: #8b949e; }
+    .count-badge {
+      background: #21262d; border: 1px solid #30363d; padding: 5px 12px;
+      border-radius: 20px; font-size: 0.85rem; color: #58a6ff; margin-left: auto;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+    thead th {
+      background: #161b22; color: #8b949e; padding: 9px 10px;
+      text-align: left; position: sticky; top: 0; cursor: pointer;
+      border-bottom: 1px solid #30363d; user-select: none; white-space: nowrap;
+    }
+    thead th:hover { color: #58a6ff; }
+    tbody tr { border-bottom: 1px solid #21262d; transition: background 0.15s; }
+    tbody tr:hover { background: #161b22; }
+    tbody td { padding: 8px 10px; white-space: nowrap; }
+    .ticker { font-weight: 700; color: #58a6ff; }
+    .name { color: #e6edf3; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+    .sector { color: #8b949e; font-size: 0.78rem; }
+    .positive { color: #3fb950; }
+    .wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #30363d; }
+    .sort-arrow { font-size: 0.7rem; margin-left: 3px; }
+    .no-results { text-align: center; padding: 40px; color: #8b949e; }
+  </style>
+</head>
+<body>
+  <h1>📈 HTF Pre-Screener</h1>
+  <div class="meta" id="meta">Loading...</div>
+
+  <div class="controls">
+    <div>
+      <label>Search Ticker / Name</label><br/>
+      <input type="text" id="searchInput" placeholder="e.g. NVDA or Nvidia" oninput="applyFilters()"/>
+    </div>
+    <div>
+      <label>Sector</label><br/>
+      <select id="sectorFilter" onchange="applyFilters()">
+        <option value="">All Sectors</option>
+      </select>
+    </div>
+    <div>
+      <label>Exchange</label><br/>
+      <select id="exchangeFilter" onchange="applyFilters()">
+        <option value="">All Exchanges</option>
+        <option value="NMS">NASDAQ</option>
+        <option value="NYQ">NYSE</option>
+        <option value="PCX">NYSE Arca</option>
+      </select>
+    </div>
+    <div class="count-badge" id="countBadge">— results</div>
+  </div>
+
+  <div class="wrapper">
+    <table id="stockTable">
+      <thead>
+        <tr>
+          <th onclick="sortTable('Ticker')">Ticker <span class="sort-arrow" id="sort-Ticker"></span></th>
+          <th onclick="sortTable('Name')">Name <span class="sort-arrow" id="sort-Name"></span></th>
+          <th onclick="sortTable('Sector')">Sector <span class="sort-arrow" id="sort-Sector"></span></th>
+          <th onclick="sortTable('Exchange')">Exch <span class="sort-arrow" id="sort-Exchange"></span></th>
+          <th onclick="sortTable('Price')">Price <span class="sort-arrow" id="sort-Price"></span></th>
+          <th onclick="sortTable('Market Cap ($M)')">MktCap ($M) <span class="sort-arrow" id="sort-Market Cap ($M)"></span></th>
+          <th onclick="sortTable('ADR (%)')">ADR % <span class="sort-arrow" id="sort-ADR (%)"></span></th>
+          <th onclick="sortTable('Price×Vol ($M)')">P×Vol ($M) <span class="sort-arrow" id="sort-Price×Vol ($M)"></span></th>
+          <th onclick="sortTable('EMA13')">EMA13 <span class="sort-arrow" id="sort-EMA13"></span></th>
+          <th onclick="sortTable('EMA21')">EMA21 <span class="sort-arrow" id="sort-EMA21"></span></th>
+          <th onclick="sortTable('EMA50')">EMA50 <span class="sort-arrow" id="sort-EMA50"></span></th>
+          <th onclick="sortTable('SMA150')">SMA150 <span class="sort-arrow" id="sort-SMA150"></span></th>
+          <th onclick="sortTable('SMA200')">SMA200 <span class="sort-arrow" id="sort-SMA200"></span></th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    let allData = [];
+    let sortKey = 'Market Cap ($M)';
+    let sortAsc = false;
+
+    const exchangeLabel = { NMS: 'NASDAQ', NYQ: 'NYSE', PCX: 'NYSE Arca', NGM: 'NASDAQ', NCM: 'NASDAQ' };
+
+    fetch('screener_results.json')
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById('meta').textContent =
+          `Last updated: ${data.last_updated} · ${data.count} stocks passed all filters`;
+        allData = data.results;
+
+        // Populate sector dropdown
+        const sectors = [...new Set(allData.map(d => d.Sector).filter(s => s && s !== 'N/A'))].sort();
+        const sel = document.getElementById('sectorFilter');
+        sectors.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s; opt.textContent = s;
+          sel.appendChild(opt);
+        });
+
+        applyFilters();
+      })
+      .catch(() => {
+        document.getElementById('meta').textContent = 'No data yet — screener will run tonight.';
+      });
+
+    function applyFilters() {
+      const search = document.getElementById('searchInput').value.toLowerCase();
+      const sector = document.getElementById('sectorFilter').value;
+      const exchange = document.getElementById('exchangeFilter').value;
+
+      let filtered = allData.filter(d => {
+        const matchSearch = !search ||
+          d.Ticker.toLowerCase().includes(search) ||
+          (d.Name || '').toLowerCase().includes(search);
+        const matchSector = !sector || d.Sector === sector;
+        const matchExch = !exchange || d.Exchange === exchange;
+        return matchSearch && matchSector && matchExch;
+      });
+
+      filtered = filtered.sort((a, b) => {
+        let va = a[sortKey], vb = b[sortKey];
+        if (typeof va === 'string') va = va.toLowerCase();
+        if (typeof vb === 'string') vb = vb.toLowerCase();
+        return sortAsc ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
+      });
+
+      document.getElementById('countBadge').textContent = `${filtered.length} results`;
+      renderTable(filtered);
+    }
+
+    function renderTable(data) {
+      const tbody = document.getElementById('tableBody');
+      if (data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="13" class="no-results">No stocks match current filters.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = data.map(d => `
+        <tr>
+          <td class="ticker">${d.Ticker}</td>
+          <td class="name" title="${d.Name}">${d.Name}</td>
+          <td class="sector">${d.Sector}</td>
+          <td>${exchangeLabel[d.Exchange] || d.Exchange}</td>
+          <td class="positive">$${d.Price}</td>
+          <td>${d['Market Cap ($M)'].toLocaleString()}</td>
+          <td class="positive">${d['ADR (%)']}%</td>
+          <td>${d['Price×Vol ($M)'].toLocaleString()}</td>
+          <td>${d.EMA13}</td>
+          <td>${d.EMA21}</td>
+          <td>${d.EMA50}</td>
+          <td>${d.SMA150}</td>
+          <td>${d.SMA200}</td>
+        </tr>
+      `).join('');
+    }
+
+    function sortTable(key) {
+      if (sortKey === key) sortAsc = !sortAsc;
+      else { sortKey = key; sortAsc = false; }
+      document.querySelectorAll('[id^="sort-"]').forEach(el => el.textContent = '');
+      document.getElementById('sort-' + key).textContent = sortAsc ? '▲' : '▼';
+      applyFilters();
+    }
+  </script>
+</body>
+</html>
